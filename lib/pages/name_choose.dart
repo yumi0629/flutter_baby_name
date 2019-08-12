@@ -1,18 +1,15 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:baby_name/model/name.dart';
+import 'package:baby_name/utils/easy_stream_builder.dart';
 import 'package:baby_name/utils/route.dart';
 import 'package:flare_flutter/flare_controls.dart';
 import 'package:flutter/material.dart';
-import 'package:rxdart/rxdart.dart';
 import 'package:flare_flutter/flare_actor.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:baby_name/utils/app_config.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers/audio_cache.dart';
-import 'package:baby_name/utils/random_util.dart';
-import 'package:sqflite/sqflite.dart';
+
+import 'name_choose_bloc.dart';
 
 class NameChoosePage extends StatefulWidget {
   final int type;
@@ -20,31 +17,17 @@ class NameChoosePage extends StatefulWidget {
   const NameChoosePage({Key key, @required this.type}) : super(key: key);
 
   @override
-  State<StatefulWidget> createState() => NameChooseState();
+  State<StatefulWidget> createState() => NameChooseState(type);
 }
 
 class NameChooseState extends State<NameChoosePage>
     with TickerProviderStateMixin {
-  AppConfig _appConfig = AppConfig.instance;
+  final int type;
+  NameChooseBloc bloc;
 
-  List<Name> _names = [];
-  int _index = 0;
-  WeightRandom _weightRandom;
+  get textColor => type == 0 ? Colors.pinkAccent : Colors.lightBlueAccent;
 
-  bool _isRandom = AppConfig.instance.loopMode == LoopMode.Random;
-
-  get textColor =>
-      widget.type == 0 ? Colors.pinkAccent : Colors.lightBlueAccent;
-
-  Name get randomName => _weightRandom?.getRandomName() ?? Name('', '');
-
-  String get showName => _appConfig.showFirstName
-      ? '${currentName.firstName}${currentName.name}'
-      : '${currentName.name}';
-
-  Name currentName = Name('', '');
-
-  StreamSubscription _subscription;
+  NameChooseState(this.type) : bloc = NameChooseBloc(type);
 
   Animation<double> _scaleAnimation;
   AnimationController _controller;
@@ -53,83 +36,47 @@ class NameChooseState extends State<NameChoosePage>
 
   AnimationController _rotateController;
   Animation<double> _rotateAnimation;
-  bool _enableMusic = AppConfig.instance.playMusic;
 
   AudioPlayer _audioPlayer;
-
-  void _getName() {
-    if (_controller.isAnimating) return;
-    Name preName = currentName;
-    currentName = _isRandom
-        ? randomName
-        : _index >= 0 && _index < _names.length ? _names[_index] : Name('', '');
-    if (currentName == preName) _getName();
-  }
 
   @override
   void initState() {
     super.initState();
-    _initMusicPlayer();
-    _initAnimation();
-    _loadNames().then((names) {
-      _names = names;
-      _weightRandom = WeightRandom(_names);
-      _subscription = Observable.periodic(
-              Duration(milliseconds: 100), (count) => count % names.length)
-          .listen((index) {
-        setState(() {
-          this._index = index;
-          _getName();
-        });
-      });
-    });
+    _initMusicPlayer(bloc.appConfig);
+    _initAnimation(bloc.appConfig);
+    bloc.loadNames(() => _controller?.isAnimating ?? false);
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
+    bloc.dispose();
     _controller.dispose();
     _rotateController.dispose();
     _audioPlayer?.release();
     super.dispose();
   }
 
-  void _initMusicPlayer() {
+  void _initMusicPlayer(AppConfig config) {
     String url =
-        _appConfig.defaultMusic ? 'castle_in_the_sky.mp3' : _appConfig.musicUrl;
+        config.defaultMusic ? 'castle_in_the_sky.mp3' : config.musicUrl;
     Future.delayed(Duration.zero, () {
-      if (_appConfig.playMusic) {
-        if (_appConfig.defaultMusic) {
+      if (config.playMusic) {
+        if (config.defaultMusic) {
           AudioCache().loop(url).then((player) {
             _audioPlayer = player;
           });
         } else {
-          _audioPlayer = AudioPlayer(mode: PlayerMode.LOW_LATENCY);
-          _audioPlayer.setReleaseMode(ReleaseMode.LOOP);
-          _audioPlayer.setUrl(url, isLocal: true);
+          _audioPlayer = AudioPlayer()
+            ..setReleaseMode(ReleaseMode.LOOP)
+            ..play(url, isLocal: true);
+          print('audio url = $url');
         }
       }
     });
   }
 
-  Future<List<Name>> _loadNames() async {
-    var db = await openDatabase('names.db');
-    String table = widget.type == 0 ? 'Girls' : 'Boys';
-    List<Map<String, dynamic>> results =
-        await db.query(table, columns: ['first_name', 'name', 'weight']);
-    List<Name> names = [];
-    results.forEach((value) {
-      names.add(Name(
-        value['first_name'],
-        value['name'],
-        weight: value['weight'],
-      ));
-    });
-    return names;
-  }
-
-  void _initAnimation() {
-    _controller = new AnimationController(
+  void _initAnimation(AppConfig config) {
+    _controller = AnimationController(
         duration: Duration(milliseconds: 1000), vsync: this);
     _scaleAnimation = new Tween<double>(
       begin: 1.0,
@@ -148,7 +95,7 @@ class NameChooseState extends State<NameChoosePage>
     ).animate(_rotateController);
 
     Future.delayed(Duration.zero, () {
-      if (_appConfig.playMusic) {
+      if (config.playMusic) {
         _rotateController.repeat();
       }
     });
@@ -163,16 +110,13 @@ class NameChooseState extends State<NameChoosePage>
   }
 
   void _chooseOrResume() {
-    if (_subscription.isPaused) {
-      _subscription.resume();
-      _flareControls.onCompleted('estrellas');
-      _controller.reset();
-    } else {
-      _subscription.pause();
+    bloc.pauseOrResumeSubscription(pause: () {
       _controller.forward();
       _flareControls.play('estrellas');
-    }
-    setState(() {});
+    }, resume: () {
+      _flareControls.onCompleted('estrellas');
+      _controller.reset();
+    });
   }
 
   @override
@@ -181,7 +125,7 @@ class NameChooseState extends State<NameChoosePage>
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.amberAccent,
         onPressed: () {
-          _subscription.pause();
+          bloc.pauseSubscription();
           Navigator.of(context).pushReplacementNamed(UIRoute.nameSetting,
               arguments: widget.type);
         },
@@ -198,20 +142,24 @@ class NameChooseState extends State<NameChoosePage>
           GestureDetector(
             child: Container(
               child: Center(
-                child: AnimatedBuilder(
-                    animation: _scaleAnimation,
-                    builder: (_, __) {
-                      return ScaleTransition(
-                        scale: _scaleAnimation,
-                        child: Text(
-                          '$showName',
-                          style: TextStyle(
-                              color: textColor,
-                              fontSize: 80.0,
-                              letterSpacing: 10.0,
-                              fontFamily: 'Lolita'),
-                        ),
-                      );
+                child: EasyStreamBuilder<String>(
+                    stream: bloc.nameSubject,
+                    builder: (context, snapshot) {
+                      return AnimatedBuilder(
+                          animation: _scaleAnimation,
+                          builder: (_, __) {
+                            return ScaleTransition(
+                              scale: _scaleAnimation,
+                              child: Text(
+                                '${snapshot.data}',
+                                style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 80.0,
+                                    letterSpacing: 10.0,
+                                    fontFamily: 'Lolita'),
+                              ),
+                            );
+                          });
                     }),
               ),
               decoration: BoxDecoration(
@@ -222,40 +170,48 @@ class NameChooseState extends State<NameChoosePage>
             behavior: HitTestBehavior.translucent,
           ),
           Positioned(
-              top: 40.0,
-              left: 20.0,
-              child: GestureDetector(
-                onTap: () {
-                  if (_rotateController.isAnimating) {
-                    _rotateController.stop();
-                  } else {
-                    _rotateController.repeat();
-                  }
-                  _enableMusic = !_enableMusic;
-                  _playOrPause();
-                  setState(() {});
-                },
-                child: Stack(
-                  children: <Widget>[
-                    RotationTransition(
-                      turns: _rotateAnimation,
-                      child: Image.asset(
-                        'images/ic_music.png',
-                        width: 40.0,
-                        height: 40.0,
+            top: 40.0,
+            left: 20.0,
+            child: EasyStreamBuilder<bool>(
+              initialData: bloc.appConfig.playMusic,
+              stream: bloc.musicSubject,
+              builder: (context, snapshot) {
+                return Visibility(
+                    visible: bloc.appConfig.playMusic,
+                    child: GestureDetector(
+                      onTap: () {
+                        if (_rotateController.isAnimating) {
+                          _rotateController.stop();
+                        } else {
+                          _rotateController.repeat();
+                        }
+                        bloc.switchPlayingStatus();
+                        _playOrPause();
+                      },
+                      child: Stack(
+                        children: <Widget>[
+                          RotationTransition(
+                            turns: _rotateAnimation,
+                            child: Image.asset(
+                              'images/ic_music.png',
+                              width: 40.0,
+                              height: 40.0,
+                            ),
+                          ),
+                          Visibility(
+                            visible: !snapshot.data,
+                            child: Image.asset(
+                              'images/ic_music_no.png',
+                              width: 40.0,
+                              height: 40.0,
+                            ),
+                          )
+                        ],
                       ),
-                    ),
-                    Visibility(
-                      visible: !_enableMusic,
-                      child: Image.asset(
-                        'images/ic_music_no.png',
-                        width: 40.0,
-                        height: 40.0,
-                      ),
-                    )
-                  ],
-                ),
-              )),
+                    ));
+              },
+            ),
+          ),
         ],
       ),
     );

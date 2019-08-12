@@ -1,13 +1,11 @@
-import 'dart:convert';
-
 import 'package:baby_name/model/name.dart';
 import 'package:baby_name/utils/universal_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite/sqflite.dart';
 
 import 'name_edit.dart';
+import 'name_setting_bloc.dart';
+import 'package:baby_name/utils/easy_stream_builder.dart';
 
 class NameSettingPage extends StatefulWidget {
   final int index;
@@ -27,6 +25,7 @@ class TabTitle {
 
 class NameSettingState extends State<NameSettingPage>
     with SingleTickerProviderStateMixin {
+  final NameSettingBloc bloc = NameSettingBloc();
   final _tabList = [TabTitle('女宝宝', 0), TabTitle('男宝宝', 1)];
   final _colors = [
     Colors.amberAccent.shade100,
@@ -47,39 +46,18 @@ class NameSettingState extends State<NameSettingPage>
   PageController _pageController;
 
   var _isPageCanChanged = true;
-  var _needFirstName = false;
 
-  List<Name> _boys = [];
-  List<Name> _girls = [];
-  Future _boysFuture;
-  Future _girlsFuture;
   final TextEditingController _boysTextController = TextEditingController();
   final TextEditingController _girlsTextController = TextEditingController();
   final TextEditingController _firstNameTextController =
       TextEditingController();
 
-  Future _loadNames(int type) async {
-    var db = await openDatabase('names.db');
-    String table = type == 0 ? 'Girls' : 'Boys';
-    List<Map<String, dynamic>> results =
-        await db.query(table, columns: ['first_name', 'name', 'weight']);
-    List<Name> names = [];
-    results.forEach((value) {
-      names.add(Name(
-        value['first_name'],
-        value['name'],
-        weight: value['weight'],
-      ));
-    });
-    type == 0 ? _girls = names : _boys = names;
-  }
-
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: widget.index);
-    _girlsFuture = _loadNames(0);
-    _boysFuture = _loadNames(1);
+    bloc.loadNames(0);
+    bloc.loadNames(1);
     _tabController = TabController(
         initialIndex: widget.index, length: _tabList.length, vsync: this)
       ..addListener(() {
@@ -111,34 +89,12 @@ class NameSettingState extends State<NameSettingPage>
     }
   }
 
-  Future _addNames(String namesStr, int type) async {
-    if (namesStr == null || namesStr.trim() == '') return;
-    List<Name> names = namesStr.split(' ').map((value) {
-      if (_needFirstName) {
-        return Name(_firstNameTextController.text, value.trim());
-      }
-      return Name('', value.trim());
-    }).toList();
-
-    var db = await openDatabase('names.db');
-    if (type == 0) {
-      _girls.addAll(names);
-      _girls = _girls.where((value) => !value.isEmpty()).toSet().toList();
-      _girlsTextController.clear();
-      await db.delete('Girls');
-      _girls.forEach((name) async {
-        await db.insert('Girls', name.toMap());
-      });
-    } else if (type == 1) {
-      _boys.addAll(names);
-      _boys = _boys.where((value) => !value.isEmpty()).toSet().toList();
-      _boysTextController.clear();
-      await db.delete('Boys');
-      _boys.forEach((name) async {
-        await db.insert('Boys', name.toMap());
-      });
-    }
-    setState(() {});
+  void _addNames(String namesStr, int type) {
+    bloc.addNames(namesStr, _firstNameTextController.text, type, () {
+      if (type == 0)
+        _girlsTextController.clear();
+      else if (type == 1) _boysTextController.clear();
+    });
   }
 
   @override
@@ -156,9 +112,7 @@ class NameSettingState extends State<NameSettingPage>
                         type: _tabController.index,
                       );
                     }).then((type) {
-                  _loadNames(type).then((_) {
-                    setState(() {});
-                  });
+                  bloc.loadNames(type);
                 });
               },
               child: Text(
@@ -231,13 +185,17 @@ class NameSettingState extends State<NameSettingPage>
                           unselectedWidgetColor: Colors.black12,
                           disabledColor: Colors.black12,
                         ),
-                        child: Checkbox(
-                            value: _needFirstName,
-                            onChanged: (isChecked) {
-                              setState(() {
-                                _needFirstName = isChecked;
-                              });
-                            }),
+                        child: EasyStreamBuilder<bool>(
+                          initialData: bloc.needFirstName,
+                          stream: bloc.firstNameSubject,
+                          builder: (context, snapshot) {
+                            return Checkbox(
+                                value: snapshot.data,
+                                onChanged: (isChecked) {
+                                  bloc.switchFirstNameStatus();
+                                });
+                          },
+                        ),
                       ),
                       Text('是否添加姓氏'),
                       Container(
@@ -271,41 +229,32 @@ class NameSettingState extends State<NameSettingPage>
           ),
           Expanded(
             flex: 1,
-            child: FutureBuilder(
-                future: index == 0 ? _girlsFuture : _boysFuture,
-                builder: (context, snapshot) {
-                  switch (snapshot.connectionState) {
-                    case ConnectionState.done:
-                      if (snapshot.hasError) return Container();
-                      return Container(
-                        child: GridView.count(
-                          shrinkWrap: true,
-                          physics: NeverScrollableScrollPhysics(),
-                          childAspectRatio: 1.8,
-                          crossAxisCount: 4,
-                          children: List.generate(
-                              index == 0 ? _girls.length : _boys.length, (i) {
-                            var name = index == 0
-                                ? '${_girls[i].firstName}${_girls[i].name}'
-                                : '${_boys[i].firstName}${_boys[i].name}';
-                            return Center(
-                              child: Chip(
-                                label: Text(
-                                  name,
-                                  style: TextStyle(color: Colors.black87),
-                                ),
-                                backgroundColor: _getColor(i),
-                              ),
-                            );
-                          }),
+            child: EasyStreamBuilder<List<Name>>(
+              stream: index == 0 ? bloc.girlsSubject : bloc.boysSubject,
+              builder: (context, snapshot) {
+                return Container(
+                  child: GridView.count(
+                    shrinkWrap: true,
+                    physics: NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.8,
+                    crossAxisCount: 4,
+                    children: List.generate(snapshot.data.length, (i) {
+                      var name =
+                          '${snapshot.data[i].firstName}${snapshot.data[i].name}';
+                      return Center(
+                        child: Chip(
+                          label: Text(
+                            name,
+                            style: TextStyle(color: Colors.black87),
+                          ),
+                          backgroundColor: _getColor(i),
                         ),
                       );
-                      break;
-                    default:
-                      return Container();
-                      break;
-                  }
-                }),
+                    }),
+                  ),
+                );
+              },
+            ),
           )
         ],
       ),

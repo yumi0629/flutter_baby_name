@@ -1,13 +1,12 @@
-import 'dart:convert';
-
 import 'package:baby_name/model/name.dart';
 import 'package:baby_name/utils/universal_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:reorderables/reorderables.dart';
-import 'package:sqflite/sqflite.dart';
+
+import 'name_edit_bloc.dart';
+import 'package:baby_name/utils/easy_stream_builder.dart';
 
 class NameEditPage extends StatefulWidget {
   final int type;
@@ -15,67 +14,26 @@ class NameEditPage extends StatefulWidget {
   const NameEditPage({Key key, @required this.type}) : super(key: key);
 
   @override
-  State<StatefulWidget> createState() => NameEditState();
+  State<StatefulWidget> createState() => NameEditState(type);
 }
 
 class NameEditState extends State<NameEditPage> {
   final double _kDefaultHorizontalPadding = 12.0;
-  List<Name> _names = [];
-  List<Widget> _widgets = [];
+  final int type;
+  NameEditBloc bloc;
 
-  Future _future;
+  NameEditState(this.type) : bloc = NameEditBloc(type);
 
   @override
   void initState() {
     super.initState();
-    _future = _loadNames();
-  }
-
-  Future _loadNames() async {
-    var db = await openDatabase('names.db');
-    String table = widget.type == 0 ? 'Girls' : 'Boys';
-    List<Map<String, dynamic>> results =
-        await db.query(table, columns: ['first_name', 'name', 'weight']);
-    List<Name> names = [];
-    results.forEach((value) {
-      names.add(Name(
-        value['first_name'],
-        value['name'],
-        weight: value['weight'],
-      ));
-    });
-    this._names = names;
-  }
-
-  void _handleReorder(int oldIndex, int newIndex) {
-//    setState(() {
-//      if (oldIndex < newIndex) {
-//        newIndex -= 1;
-//      }
-//      final Name name = _names.removeAt(oldIndex);
-//      _names.insert(newIndex, name);
-//    });
-    final Name name = _names.removeAt(oldIndex);
-    _names.insert(newIndex, name);
-    setState(() {
-      final Widget row = _widgets.removeAt(oldIndex);
-      _widgets.insert(newIndex, row);
-    });
-  }
-
-  void _deleteName(Name name) {
-    setState(() {
-      _names.remove(name);
+    bloc.loadNames((value) {
+      return _buildEditItem(value);
     });
   }
 
   Future _save() async {
-    var db = await openDatabase('names.db');
-    String table = widget.type == 0 ? 'Girls' : 'Boys';
-    await db.delete(table);
-    _names.forEach((name) async {
-      await db.insert(table, name.toMap());
-    });
+    await bloc.save();
     Navigator.of(context).pop(widget.type);
   }
 
@@ -146,38 +104,19 @@ class NameEditState extends State<NameEditPage> {
             ),
             Expanded(
               child: Container(
-                child: FutureBuilder(
-                    future: _future,
+                child: EasyStreamBuilder<List<Widget>>(
+                    stream: bloc.widgetSubject,
                     builder: (context, snapshot) {
-                      switch (snapshot.connectionState) {
-                        case ConnectionState.done:
-                          if (snapshot.hasError) return Container();
+                      return CustomScrollView(
+                        slivers: <Widget>[
                           // 这里不用官方的ReorderableListView，在Expanded里面有bug，拖动item悬浮不动时，listview会抖动
-//                          return ReorderableListView(
-//                              padding: EdgeInsets.all(0.0),
-//                              children: _names.map((value) {
-//                                return _buildEditItem(value);
-//                              }).toList(),
-//                              onReorder: _handleReorder);
-                          _widgets.clear();
-                          _names.forEach((value) {
-                            _buildEditItem(value);
-                          });
-                          print(_widgets);
-                          return CustomScrollView(
-                            slivers: <Widget>[
-                              ReorderableSliverList(
-                                delegate: ReorderableSliverChildListDelegate(
-                                    _widgets),
-                                onReorder: _handleReorder,
-                              )
-                            ],
-                          );
-                          break;
-                        default:
-                          return Container();
-                          break;
-                      }
+                          ReorderableSliverList(
+                            delegate: ReorderableSliverChildListDelegate(
+                                snapshot.data),
+                            onReorder: bloc.handleReorder,
+                          )
+                        ],
+                      );
                     }),
               ),
             ),
@@ -199,8 +138,8 @@ class NameEditState extends State<NameEditPage> {
     );
   }
 
-  void _buildEditItem(Name name) {
-    var item = Container(
+  Widget _buildEditItem(Name name) {
+    return Container(
       padding: EdgeInsets.only(left: _kDefaultHorizontalPadding),
       key: Key('${name.firstName}${name.name}'),
       height: 40.0,
@@ -239,7 +178,7 @@ class NameEditState extends State<NameEditPage> {
                     ),
                   ),
                   Expanded(
-                    flex: 3,
+                    flex: 2,
                     child: Container(
                       padding: EdgeInsets.fromLTRB(0.0, 2.0, 5.0, 2.0),
                       child: TextField(
@@ -257,6 +196,15 @@ class NameEditState extends State<NameEditPage> {
                       ),
                     ),
                   ),
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      padding: EdgeInsets.fromLTRB(10.0, 8.0, 15.0, 8.0),
+                      child: Image.asset(
+                        'images/ic_drag.png',
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -265,7 +213,7 @@ class NameEditState extends State<NameEditPage> {
         actionPane: SlidableDrawerActionPane(),
         secondaryActions: <Widget>[
           GestureDetector(
-            onTap: () => _deleteName(name),
+            onTap: () => bloc.deleteName(name),
             child: Container(
               alignment: Alignment.center,
               padding: EdgeInsets.fromLTRB(10.0, 5.0, 10.0, 5.0),
@@ -279,6 +227,5 @@ class NameEditState extends State<NameEditPage> {
         ],
       ),
     );
-    _widgets.add(item);
   }
 }

@@ -10,11 +10,11 @@ class AppSettingPage extends StatefulWidget {
 
 class AppSettingState extends State<AppSettingPage> {
   AppConfig appConfig = AppConfig.instance;
-  String musicUrl = '';
+  String musicUrl = AppConfig.instance.musicUrl ?? '';
 
   String get musicName => musicUrl.lastIndexOf('/') == -1
       ? ''
-      : musicUrl.substring(musicUrl.lastIndexOf('/'));
+      : musicUrl.substring(musicUrl.lastIndexOf('/') + 1);
 
   @override
   void dispose() {
@@ -57,7 +57,14 @@ class AppSettingState extends State<AppSettingPage> {
                 appConfig.loopMode = value;
               });
             }),
-        Text('顺序模式'),
+        Text.rich(
+          TextSpan(text: '顺序模式', children: [
+            TextSpan(
+              text: '（该模式下权重无效）',
+              style: TextStyle(color: Colors.black26, fontSize: 12.0),
+            )
+          ]),
+        ),
         Radio<LoopMode>(
             value: LoopMode.Random,
             groupValue: appConfig.loopMode,
@@ -163,12 +170,14 @@ class AppSettingState extends State<AppSettingPage> {
             ),
           ),
           MaterialButton(
-            onPressed: () => _openAudioFilePicker(),
+            onPressed:
+                appConfig.defaultMusic ? null : () => _openAudioFilePicker(),
             child: Text('选择'),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(60.0),
             ),
             color: Colors.amberAccent,
+            disabledColor: Colors.black26,
             minWidth: 20.0,
             height: 30.0,
             elevation: 0.0,
@@ -181,7 +190,9 @@ class AppSettingState extends State<AppSettingPage> {
   void _openAudioFilePicker() {
     PermissionHandler()
         .requestPermissions([PermissionGroup.storage]).then((map) {
-      FilePicker.getFilePath(type: FileType.AUDIO).then((path) {
+      FilePicker.getFilePath(type: FileType.AUDIO)
+          .then((path) {
+        if (path == null || path.isEmpty) return;
         musicUrl = path;
         appConfig.musicUrl = path;
         setState(() {});
