@@ -1,16 +1,15 @@
 # baby_name
 
-A new Flutter application.
+An application to help your baby to choose his/her name by himself/herself.
 
-## Getting Started
+一个帮助你家宝宝自己选名字的App~~~
 
-This project is a starting point for a Flutter application.
+来自程序员父母泥石流般的爱~~~
 
-A few resources to get you started if this is your first Flutter project:
+名字这种东西，当然是要自己选啦~~~
 
-- [Lab: Write your first Flutter app](https://flutter.dev/docs/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://flutter.dev/docs/cookbook)
-
-For help getting started with Flutter, view our
-[online documentation](https://flutter.dev/docs), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+![](https://github.com/yumi0629/PreImages/blob/master/baby_name.gif?raw=true)
+![](https://github.com/yumi0629/PreImages/blob/master/baby_name_home.png?raw=true)
+![](https://github.com/yumi0629/PreImages/blob/master/baby_name_setting.png?raw=true)
+![](https://github.com/yumi0629/PreImages/blob/master/baby_name_edit.png?raw=true)
+![](https://github.com/yumi0629/PreImages/blob/master/baby_name_app_setting.png?raw=true)

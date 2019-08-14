@@ -183,7 +183,6 @@ class NameEditState extends State<NameEditPage> {
                       padding: EdgeInsets.fromLTRB(0.0, 2.0, 5.0, 2.0),
                       child: TextField(
                         onChanged: (value) {
-                          print('weight onChanged :$value');
                           name.weight = int.parse(value);
                         },
                         keyboardType: TextInputType.number,
